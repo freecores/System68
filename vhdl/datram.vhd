@@ -79,7 +79,7 @@ dat_write : process( clk, rst, addr_lo, cs, rw, data_in,
                      dat_reg8, dat_reg9, dat_reg10, dat_reg11,
                      dat_reg12, dat_reg13, dat_reg14, dat_reg15 )
 begin
-  if clk'event and clk = '1' then
+  if clk'event and clk = '0' then
     if rst = '1' then
       dat_reg0 <= "00000000";
       dat_reg1 <= "00000001";

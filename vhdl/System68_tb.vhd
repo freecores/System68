@@ -4,14 +4,14 @@
 --
 --  This core adheres to the GNU public license  
 --
--- File name      : system68.vhd
+-- File name      : system68_tb.vhd
 --
 -- Purpose        : Top level file for a 6800 compatible system on a chip
 --                  Designed for the Burch ED B5-Spartan IIe board with
 --                  X2S300e FPGA,
---                  128K x 16 Word SRAM module (B5-SRAM)
---                  CPU I/O module (B5-Peripheral-Connectors)
---                  Compact Flash Module (B5-CF)
+--                  128K x 16 Word SRAM module (Modified B3_SRAM)
+--                  CPU I/O module
+--                  B5 Compact Flash Module
 --                  Using mimiUart from open cores modified to look like a 6850
 --                  This version of System68 boots the monitor program
 --                  from LBA sectors $F478 / $F479 from a 32 Mbyte Compact Flash
@@ -46,33 +46,19 @@
 -- Added Compact Flash Interface
 -- Added IO register to commit unused inputs
 -- Used 16 byte port mapping
---
--- 28th June 2003			0.3        John Kent
+-- 28th June 2003
 -- updated CPU to include Halt and Hold signals
---
--- 9th January 2004     0.4        John Kent
--- Removed Redundant Map Switch Code.
--- Rearrange DAT
--- Added dual port IO at $8030 - $803F
---
--- 25th April 2004      0.5        John Kent
--- Changed CPU clock to run at 25MHz / 2 = 12.5 MHz
--- Added baud rate divider for 57.6 Kbaud.
---
 -------------------------------------------------------------------------------
 --
 -- Memory Map:
 --
 -- $0000 - $7FFF RAM
--- $8000 - $8FFF IO
+-- $8000 - $9FFF IO
 --     $8000 - $800F MiniUart / Acia
 --     $8010 - $801F Compact Flash
 --     $8020 - $802F Timer
---     $8030 - $803F IO port
---     $8040 - $804F Trap hardware
--- $9000 - $BFFF RAM
--- $C000 - $CFFF ROM
--- $D000 - $DFFF RAM
+--     $8030 - $803F IO register / Map switch
+-- $A000 - $DFFF RAM
 -- $E000 - $FFFF ROM (read) & DAT (write)
 --
 library ieee;
@@ -81,26 +67,23 @@ library ieee;
    use IEEE.STD_LOGIC_UNSIGNED.ALL;
    use ieee.numeric_std.all;
 
-entity Sys68 is
+entity System68 is
   port(
-    SysClk      : in    Std_Logic;  -- System Clock input
-	 Reset_n     : in    Std_logic;  -- Master Reset input (active low)
-
     -- Memory Interface signals B3-SRAM
-    ram_csn     : out   Std_Logic;  -- RAM Chip select (active low)
-    ram_wrln    : out   Std_Logic;  -- lower byte write strobe (active low)
-    ram_wrun    : out   Std_Logic;  -- upper byte write strobe (active low)
-    ram_addr    : out   Std_Logic_Vector(16 downto 0);   -- RAM Address bus
+    ram_csn     : out Std_Logic;  -- RAM Chip select (active low)
+    ram_wrln    : out Std_Logic;  -- lower byte write strobe (active low)
+    ram_wrun    : out Std_Logic;  -- upper byte write strobe (active low)
+    ram_addr    : out Std_Logic_Vector(16 downto 0);   -- RAM Address bus
     ram_data    : inout Std_Logic_Vector(15 downto 0); -- RAM Data bus
 
 	 -- Signals defined on B3-CPU-IO Module
-    LED         : out   std_logic;  -- Diagnostic LED Flasher
+    LED         : out std_logic;  -- Diagnostic LED Flasher
 
 	 -- Uart Interface
-    rxbit       : in    Std_Logic; -- UART receive data
-	 txbit       : out   Std_Logic; -- UART transmit data
-    rts_n       : out   Std_Logic; -- Request to send (active low)
-    cts_n       : in    Std_Logic; -- Clear to send (active low)
+    rxbit       : in  Std_Logic; -- UART receive data
+	 txbit       : out Std_Logic; -- UART transmit data
+    rts_n       : out Std_Logic; -- Request to send (active low)
+    cts_n       : in  Std_Logic; -- Clear to send (active low)
 
 	 -- CRTC output signals
 --	   v_drive     : out Std_Logic;
@@ -114,13 +97,13 @@ entity Sys68 is
 --	   buzzer      : out std_logic;
 
     -- Compact Flash B5-CF Module
-    cf_rst_n     : out   std_logic;
-	 cf_cs0_n     : out   std_logic;
-	 cf_cs1_n     : out   std_logic;
-    cf_rd_n      : out   std_logic;
-    cf_wr_n      : out   std_logic;
-	 cf_cs16_n    : out   std_logic;
-    cf_a         : out   std_logic_vector(2 downto 0);
+    cf_rst_n     : out std_logic;
+	 cf_cs0_n     : out std_logic;
+	 cf_cs1_n     : out std_logic;
+    cf_rd_n      : out std_logic;
+    cf_wr_n      : out std_logic;
+	 cf_cs16_n    : out std_logic;
+    cf_a         : out std_logic_vector(2 downto 0);
     cf_d         : inout std_logic_vector(15 downto 0);
 --    cf_intrq     : in std_logic;
 --    cf_iordy     : in std_logic;
@@ -128,91 +111,94 @@ entity Sys68 is
 --	   cf_pdiag     : in std_logic;
 --	   cf_present   : in std_logic;
 
---- IOPort Pins
-	 porta        : inout std_logic_vector(7 downto 0);
-	 portb        : inout std_logic_vector(7 downto 0);
-
---- Timer output
-    timer_out    : out std_logic;
-
--- External Bus
-    bus_addr     : out   std_logic_vector(15 downto 0);
-	 bus_data     : inout std_logic_vector(7 downto 0);
-	 bus_rw       : out   std_logic;
-	 bus_cs       : out   std_logic;
-	 bus_clk      : out   std_logic;
-	 bus_reset    : out   std_logic
+-- Test Pins
+	 test_alu    : out std_logic_vector(15 downto 0); -- ALU output for timing constraints
+	 test_cc     : out std_logic_vector(7 downto 0)   -- Condition Code Outputs for timing constraints
 	 );
 end;
 
 -------------------------------------------------------------------------------
 -- Architecture for memio Controller Unit
 -------------------------------------------------------------------------------
-architecture my_computer of Sys68 is
+architecture my_computer of System68 is
   -----------------------------------------------------------------------------
   -- Signals
   -----------------------------------------------------------------------------
+  Signal SysClk    : std_logic;
+  signal reset_n   : std_logic;
+
+  -- Compact Flash BOOT ROM
+--  signal boot_cs          : Std_Logic;
+--  signal boot_data_out    : Std_Logic_Vector(7 downto 0);
+
   -- SWTBUG in Slices
   signal monitor_cs       : Std_Logic;
   signal monitor_data_out : Std_Logic_Vector(7 downto 0);
 
   -- SWTBUG in Block RAM
-  signal swtbug_cs       : Std_Logic;
-  signal swtbug_data_out : Std_Logic_Vector(7 downto 0);
+  signal swtbug_cs        : Std_Logic;
+  signal swtbug_hold      : Std_Logic;
+  signal swtbug_data_out  : Std_Logic_Vector(7 downto 0);
 
   -- UART Interface signals
-  signal uart_cs         : Std_Logic;
-  signal uart_data_out   : Std_Logic_Vector(7 downto 0);  
-  signal uart_irq        : Std_Logic;
-  signal dcd_n           : Std_Logic;
-  signal baudclk         : Std_Logic;
+  signal uart_cs       : Std_Logic;
+  signal uart_data_out : Std_Logic_Vector(7 downto 0);  
+  signal uart_irq      : Std_Logic;
 
   -- timer
-  signal timer_cs        : std_logic;
-  signal timer_data_out  : std_logic_vector(7 downto 0);
-  signal timer_irq       : std_logic;
+  signal timer_cs       : std_logic;
+  signal timer_data_out : std_logic_vector(7 downto 0);
+  signal timer_irq      : std_logic;
+  signal timer_out      : std_logic;
 
   -- trap
-  signal trap_cs         : std_logic;
-  signal trap_data_out   : std_logic_vector(7 downto 0);
-  signal trap_irq        : std_logic;
-
-  -- ioport
-  signal ioport_cs       : std_logic;
-  signal ioport_data_out : std_logic_vector(7 downto 0);
+--  signal trap_cs       : std_logic;
+--  signal trap_data_out : std_logic_vector(7 downto 0);
+--  signal trap_irq      : std_logic;
 
   -- compact flash port
-  signal cf_cs           : std_logic;
-  signal cf_rd           : std_logic;
-  signal cf_wr           : std_logic;
-  signal cf_data_out     : std_logic_vector(7 downto 0);
+  signal cf_cs       : std_logic;
+  signal cf_rd       : std_logic;
+  signal cf_wr       : std_logic;
+  signal cf_data_out : std_logic_vector(7 downto 0);
 
   -- RAM
-  signal ram_cs          : std_logic; -- memory chip select
-  signal ram_wrl         : std_logic; -- memory write lower
-  signal ram_wru         : std_logic; -- memory write upper
-  signal ram_data_out    : std_logic_vector(7 downto 0);
+  signal ram_cs       : std_logic; -- memory chip select
+  signal ram_wrl      : std_logic; -- memory write lower
+  signal ram_wru      : std_logic; -- memory write upper
+  signal ram_data_out : std_logic_vector(7 downto 0);
 
   -- CPU Interface signals
-  signal cpu_reset       : Std_Logic;
-  signal cpu_clk         : Std_Logic;
-  signal cpu_rw          : std_logic;
-  signal cpu_vma         : std_logic;
-  signal cpu_halt        : std_logic;
-  signal cpu_hold        : std_logic;
-  signal cpu_irq         : std_logic;
-  signal cpu_nmi         : std_logic;
-  signal cpu_addr        : Std_Logic_Vector(15 downto 0);
-  signal cpu_data_in     : Std_Logic_Vector(7 downto 0);
-  signal cpu_data_out    : Std_Logic_Vector(7 downto 0);
+  signal cpu_reset    : Std_Logic;
+  signal cpu_rw       : std_logic;
+  signal cpu_vma      : std_logic;
+  signal cpu_halt     : std_logic;
+  signal cpu_hold     : std_logic;
+  signal cpu_irq      : std_logic;
+  signal cpu_nmi      : std_logic;
+  signal cpu_addr     : Std_Logic_Vector(15 downto 0);
+  signal cpu_data_in  : Std_Logic_Vector(7 downto 0);
+  signal cpu_data_out : Std_Logic_Vector(7 downto 0);
+
+  -- test signals
+--  signal test_alu     : std_logic_vector(15 downto 0); -- ALU output for timing constraints
+--  signal test_cc      : std_logic_vector(7 downto 0);   -- Condition Code Outputs for timing constraints
 
   -- Dynamic Address Translation RAM
-  signal dat_cs          : std_logic;
-  signal dat_addr        : std_logic_vector(7 downto 0);
+  signal dat_cs       : std_logic;
+  signal dat_addr     : std_logic_vector(7 downto 0);
 
--- Flashing Led test signals
-  signal countL          : std_logic_vector(23 downto 0);
-  signal BaudCount       : std_logic_vector(4 downto 0);
+  -- Boot ROM map Switch
+--  signal map_cs       : std_logic;
+--  signal map_sw       : std_logic; -- reset high for ROM. Write low for RAM
+
+  -- Clock Generator
+--  signal CpuClk       : std_logic;     -- unbuffered clock - SysClk / 4
+--  signal cpu_clk      : std_logic;     -- buffered clock
+--  signal clk_divider  : std_logic_vector(1 downto 0); -- divide by 4 counter
+
+  -- Flashing Led test signals
+  signal countL       : std_logic_vector(23 downto 0);
 
 -----------------------------------------------------------------
 --
@@ -232,7 +218,9 @@ component cpu68
 	 hold:     in  std_logic;
 	 halt:     in  std_logic;
 	 irq:      in  std_logic;
-	 nmi:      in  std_logic
+	 nmi:      in  std_logic;
+	 test_alu: out std_logic_vector(15 downto 0);
+	 test_cc:  out std_logic_vector(7 downto 0)
   );
 end component;
 
@@ -245,20 +233,17 @@ end component;
 component miniUART
   port (
      clk      : in  Std_Logic;  -- System Clock
-     rst      : in  Std_Logic;  -- Reset input (active high)
-     cs       : in  Std_Logic;  -- miniUART Chip Select
-     rw       : in  Std_Logic;  -- Read / Not Write
-     irq      : out Std_Logic;  -- Interrupt
-     Addr     : in  Std_Logic;  -- Register Select
-     DataIn   : in  Std_Logic_Vector(7 downto 0); -- Data Bus In 
-     DataOut  : out Std_Logic_Vector(7 downto 0); -- Data Bus Out
-     RxC      : in  Std_Logic;  -- Receive Baud Clock
-     TxC      : in  Std_Logic;  -- Transmit Baud Clock
-     RxD      : in  Std_Logic;  -- Receive Data
-     TxD      : out Std_Logic;  -- Transmit Data
-	  DCD_n    : in  Std_Logic;  -- Data Carrier Detect
-     CTS_n    : in  Std_Logic;  -- Clear To Send
-     RTS_n    : out Std_Logic );  -- Request To send
+     rst      : in  Std_Logic;  -- Reset input
+     cs       : in  Std_Logic;
+     rw       : in  Std_Logic;
+     RxD      : in  Std_Logic;
+     TxD      : out Std_Logic;
+     CTS_n    : in  Std_Logic;
+     RTS_n    : out Std_Logic;
+     Irq      : out Std_logic;
+     Addr     : in  Std_Logic;
+     DataIn   : in  Std_Logic_Vector(7 downto 0); -- 
+     DataOut  : out Std_Logic_Vector(7 downto 0)); -- 
 end component;
 
 
@@ -283,32 +268,19 @@ component timer
 	  );
 end component;
 
-component trap
-	port (	
-	 clk        : in  std_logic;
-    rst        : in  std_logic;
-    cs         : in  std_logic;
-    rw         : in  std_logic;
-    vma        : in  std_logic;
-    addr       : in  std_logic_vector(15 downto 0);
-    data_in    : in  std_logic_vector(7 downto 0);
-	 data_out   : out std_logic_vector(7 downto 0);
-	 irq        : out std_logic
-  );
-end component;
-
-component ioport
-	port (	
-	 clk       : in  std_logic;
-    rst       : in  std_logic;
-    cs        : in  std_logic;
-    rw        : in  std_logic;
-    addr      : in  std_logic_vector(1 downto 0);
-    data_in   : in  std_logic_vector(7 downto 0);
-	 data_out  : out std_logic_vector(7 downto 0);
-	 porta_io  : inout std_logic_vector(7 downto 0);
-	 portb_io  : inout std_logic_vector(7 downto 0) );
-end component;
+--component trap
+--	port (	
+--	 clk        : in  std_logic;
+--    rst        : in  std_logic;
+--    cs         : in  std_logic;
+--    rw         : in  std_logic;
+--    vma        : in  std_logic;
+--    addr       : in  std_logic_vector(15 downto 0);
+--    data_in    : in  std_logic_vector(7 downto 0);
+--	 data_out   : out std_logic_vector(7 downto 0);
+--	 irq        : out std_logic
+--  );
+--end component trap;
 
 component dat_ram
   port (
@@ -322,6 +294,14 @@ component dat_ram
 	 data_out: out std_logic_vector(7 downto 0)
 	 );
 end component;
+
+--component boot_rom
+--  port (
+--	 cs    : in  std_logic;
+--    addr  : in  Std_Logic_Vector(7 downto 0);  -- 256 byte cf boot rom
+--	 data  : out Std_Logic_Vector(7 downto 0)
+--  );
+--end component boot_rom;
 
 --
 -- SWTBug Monitor ROM at $E000
@@ -343,13 +323,14 @@ component BUFG
 end component;
 
 --
--- SWTBUG Monitor in Block RAM at $C000
+-- SWTBUG Monitor in Block RAM
 --
 component swtbug_rom
   port (
     clk    : in  std_logic;
   	 rst    : in  std_logic;
 	 cs     : in  std_logic;
+	 hold   : out std_logic;
 	 rw     : in  std_logic;
     addr   : in  std_logic_vector (9 downto 0);
     wdata  : in  std_logic_vector (7 downto 0);
@@ -363,7 +344,8 @@ begin
   -----------------------------------------------------------------------------
 
 my_cpu : cpu68  port map (    
-	 clk	     => cpu_clk,
+	 clk	     => SysClk,
+--    clk       => cpu_clk,
     rst       => cpu_reset,
     rw	     => cpu_rw,
     vma       => cpu_vma,
@@ -373,29 +355,30 @@ my_cpu : cpu68  port map (
 	 hold      => cpu_hold,
 	 halt      => cpu_halt,
 	 irq       => cpu_irq,
-	 nmi       => cpu_nmi
+	 nmi       => cpu_nmi,
+	 test_alu  => test_alu,
+	 test_cc   => test_cc
   );
 
 my_uart  : miniUART port map (
-	 clk	     => cpu_clk,
+	 clk	     => SysClk,
+--    clk       => cpu_clk,
 	 rst       => cpu_reset,
     cs        => uart_cs,
 	 rw        => cpu_rw,
-    irq       => uart_irq,
-    Addr      => cpu_addr(0),
-	 Datain    => cpu_data_out,
-	 DataOut   => uart_data_out,
-	 RxC       => baudclk,
-	 TxC       => baudclk,
 	 RxD       => rxbit,
 	 TxD       => txbit,
-	 DCD_n     => dcd_n,
 	 CTS_n     => cts_n,
-	 RTS_n     => rts_n
+	 RTS_n     => rts_n,
+    Irq       => uart_irq,
+    Addr      => cpu_addr(0),
+	 Datain    => cpu_data_out,
+	 DataOut   => uart_data_out
 	 );
 
 my_timer  : timer port map (
-	 clk	     => cpu_clk,
+	 clk	     => SysClk,
+--    clk       => cpu_clk,
 	 rst       => cpu_reset,
     cs        => timer_cs,
 	 rw        => cpu_rw,
@@ -407,32 +390,21 @@ my_timer  : timer port map (
 	 timer_out => timer_out
     );
 
-my_trap : trap port map (	
-	 clk        => cpu_clk,
-    rst        => cpu_reset,
-    cs         => trap_cs,
-    rw         => cpu_rw,
-	 vma        => cpu_vma,
-    addr       => cpu_addr,
-    data_in    => cpu_data_out,
-	 data_out   => trap_data_out,
-	 irq        => trap_irq
-    );
-
-my_ioport : ioport port map (	
-	 clk        => cpu_clk,
-    rst        => cpu_reset,
-    cs         => ioport_cs,
-    rw         => cpu_rw,
-    addr       => cpu_addr(1 downto 0),
-    data_in    => cpu_data_out,
-	 data_out   => ioport_data_out,
-	 porta_io   => porta,
-	 portb_io   => portb
-    );
+--my_trap : trap port map (	
+--	 clk        => cpu_clk,
+--    rst        => cpu_reset,
+--    cs         => trap_cs,
+--    rw         => cpu_rw,
+--	 vma        => cpu_vma,
+--    addr       => cpu_addr,
+--    data_in    => cpu_data_out,
+--	 data_out   => trap_data_out,
+--	 irq        => trap_irq
+--  );
 
 my_dat : dat_ram port map (
-	 clk	      => cpu_clk,
+	 clk	     => SysClk,
+--    clk       => cpu_clk,
 	 rst        => cpu_reset,
 	 cs         => dat_cs,
 	 rw         => cpu_rw,
@@ -441,6 +413,12 @@ my_dat : dat_ram port map (
     data_in    => cpu_data_out,
 	 data_out   => dat_addr(7 downto 0)
 	 );
+
+--my_boot_rom : boot_rom port map (
+--    cs         => boot_cs,
+--	 addr       => cpu_addr(7 downto 0),
+--    data       => boot_data_out
+--	 );
 
 --
 -- SWTBUG Monitor
@@ -455,9 +433,10 @@ my_monitor_rom : monitor_rom port map (
 -- SWTBUG Monitor using BLOCKRAM
 --
 my_swtbug_rom : swtbug_rom port map (
-    clk      => cpu_clk,
+    clk      => SysClk,
 	 rst      => cpu_reset,
     cs       => swtbug_cs,
+    hold     => swtbug_hold,
     rw       => cpu_rw,
     addr     => cpu_addr(9 downto 0),
     wdata    => cpu_data_out,
@@ -465,10 +444,10 @@ my_swtbug_rom : swtbug_rom port map (
     );
 
 
-clock_buffer : BUFG port map (
-    i       => CountL(0),
-	 o       => cpu_clk
-    );
+--clock_buffer : BUFG port map (
+--     i       => CpuClk,
+--	  o       => cpu_clk
+--  );
 	 
 ----------------------------------------------------------------------
 --
@@ -477,47 +456,68 @@ clock_buffer : BUFG port map (
 ----------------------------------------------------------------------
 
 decode: process( cpu_addr, cpu_rw, cpu_vma, cpu_data_in,
-					  monitor_data_out,
-				     ram_data_out,
-				     swtbug_data_out,
-				     uart_data_out,
-				     cf_data_out,
-				     timer_data_out,
-				     trap_data_out,
-					  bus_data,
+--                 boot_cs, boot_data_out,
+					  monitor_cs, monitor_data_out,
+				     ram_cs, ram_data_out,
+				     swtbug_cs, swtbug_data_out,
+				     uart_cs, uart_data_out,
+				     cf_cs, cf_data_out,
+				     timer_cs, timer_data_out,
+--				     trap_cs, trap_data_out,
+--					  map_cs, map_sw,
 				     dat_cs )
 begin
     --
 	 -- Memory Map
 	 --
-      case cpu_addr(15 downto 12) is
-		when "1111" | "1110" => -- $E000 - $FFFF
+      case cpu_addr(15 downto 13) is
+		when "111" => -- $E000 - $FFFF
 		   cpu_data_in <= monitor_data_out;            -- read ROM
 		   monitor_cs <= cpu_vma;
 		   swtbug_cs  <= '0';
+--			boot_cs    <= '0';
 			dat_cs     <= cpu_vma;                      -- write DAT
 			ram_cs     <= '0';
 			uart_cs    <= '0';
 			cf_cs      <= '0';
 			timer_cs   <= '0';
-			trap_cs    <= '0';
-			ioport_cs  <= '0';
-			bus_cs     <= '0';
-		when "1100" => -- $C000 - $CFFF
+--			trap_cs    <= '0';
+--			map_cs     <= '0';
+--		when "1101" => -- $D000 - $DFFF
+--		   monitor_cs <= '0';
+--		   swtbug_cs  <= '0';
+--		   if map_sw = '1' then
+-- 		     cpu_data_in <= boot_data_out;             -- read ROM
+--			  boot_cs     <= cpu_vma;                   -- boot rom read only
+--			  dat_cs      <= '0';                       -- disable write to DAT
+--			  ram_cs      <= cpu_vma;                   -- enable write to RAM
+--			else
+--			  cpu_data_in <= ram_data_out;              -- read RAM
+--			  boot_cs     <= '0';                       -- disable boot rom
+--			  dat_cs      <= cpu_vma;                   -- enable write DAT
+--			  ram_cs      <= cpu_vma and cpu_rw;        -- disable write to RAM
+--			end if;
+--			uart_cs    <= '0';
+--			cf_cs      <= '0';
+--			timer_cs   <= '0';
+--			trap_cs    <= '0';
+--			map_cs     <= '0';
+		when "110" => -- $C000 - $DFFF
 		   cpu_data_in <= swtbug_data_out;
 		   monitor_cs <= '0';
 		   swtbug_cs  <= cpu_vma;
+--			boot_cs    <= '0';
 			dat_cs     <= '0';
 			ram_cs     <= '0';
 			uart_cs    <= '0';
 			cf_cs      <= '0';
 			timer_cs   <= '0';
-			trap_cs    <= '0';
-			ioport_cs  <= '0';
-			bus_cs     <= '0';
-		when "1000" => -- $8000 - $8FFF
+--			trap_cs    <= '0';
+--			map_cs     <= '0';
+		when "100" => -- $8000 - $9FFF
 		   monitor_cs <= '0';
 		   swtbug_cs  <= '0';
+--			boot_cs    <= '0';
 			dat_cs     <= '0';
 			ram_cs     <= '0';
 		   case cpu_addr(6 downto 4) is
@@ -525,23 +525,12 @@ begin
 			-- UART
 			--
 			when "000" => -- ($8000 - $800F)
-			  if cpu_addr(3 downto 2) = "01" then
-		       cpu_data_in <= uart_data_out;
-			    uart_cs     <= cpu_vma;
-			    cf_cs       <= '0';
-			    timer_cs    <= '0';
-			    trap_cs     <= '0';
-			    ioport_cs   <= '0';
-			    bus_cs      <= '0';
-           else
-		       cpu_data_in <= "00000000";
-			    uart_cs     <= '0';
-			    cf_cs       <= '0';
-			    timer_cs    <= '0';
-			    trap_cs     <= '0';
-			    ioport_cs   <= '0';
-			    bus_cs     <= '0';
-           end if;
+		     cpu_data_in <= uart_data_out;
+			  uart_cs     <= cpu_vma;
+			  cf_cs       <= '0';
+			  timer_cs    <= '0';
+--			  trap_cs     <= '0';
+--			  map_cs      <= '0';
 			--
 			-- Compact Flash
 			--
@@ -550,9 +539,8 @@ begin
 			  uart_cs     <= '0';
            cf_cs       <= cpu_vma;
 			  timer_cs    <= '0';
-			  trap_cs     <= '0';
-			  ioport_cs   <= '0';
-			  bus_cs      <= '0';
+--			  trap_cs     <= '0';
+--			  map_cs      <= '0';
 			--
 			-- Timer
 			--
@@ -561,74 +549,87 @@ begin
 			  uart_cs     <= '0';
 			  cf_cs       <= '0';
            timer_cs    <= cpu_vma;
-			  trap_cs     <= '0';
-			  ioport_cs   <= '0';
-			  bus_cs      <= '0';
+--			  trap_cs     <= '0';
+--			  map_cs      <= '0';
 			--
-			-- IO Port
+			-- Memory Map switch
 			--
 			when "011" => -- ($8030 - $803F)
-           cpu_data_in <= ioport_data_out;
+           cpu_data_in <= "00000000";
 			  uart_cs     <= '0';
 			  cf_cs       <= '0';
            timer_cs    <= '0';
-			  trap_cs     <= '0';
-			  ioport_cs   <= cpu_vma;
-			  bus_cs      <= '0';
+--			  trap_cs     <= '0';
+--			  map_cs      <= cpu_vma;
 			--
 			-- Trap hardware
 			--
-			when "100" => -- ($8040 - $804F)
-           cpu_data_in <= trap_data_out;
-			  uart_cs     <= '0';
-			  cf_cs       <= '0';
-           timer_cs    <= '0';
-			  trap_cs     <= cpu_vma;
-			  ioport_cs   <= '0';
-			  bus_cs      <= '0';
+--			when "100" => -- ($8040 - $804F)
+--           cpu_data_in <= trap_data_out;
+--			  uart_cs     <= '0';
+--			  cf_cs       <= '0';
+--          timer_cs    <= '0';
+--			  trap_cs     <= cpu_vma;
+--			  map_cs      <= '0';
 			--
 			-- Null devices
 			--
 			when others => -- $8050 to $9FFF
-           cpu_data_in <= bus_data;
+           cpu_data_in <= "00000000";
 			  uart_cs     <= '0';
 			  cf_cs       <= '0';
 			  timer_cs    <= '0';
-			  trap_cs     <= '0';
-			  ioport_cs   <= '0';
-			  bus_cs      <= cpu_vma;
+--			  trap_cs     <= '0';
+--			  map_cs      <= '0';
 		   end case;
-		 when others =>
+		 when "000" |  -- $0000 - $1FFF
+	         "001" |  -- $2000 - $3FFF
+			   "010" |  -- $4000 - $5FFF
+			   "011" |  -- $6000 - $7FFF
+		      "101" => -- $A000 - $BFFF
 		   cpu_data_in <= ram_data_out;
 		   monitor_cs <= '0';
 		   swtbug_cs  <= '0';
+--			boot_cs    <= '0';
 		   ram_cs     <= cpu_vma;
 		   dat_cs     <= '0';
 		   uart_cs    <= '0';
 		   cf_cs      <= '0';
 		   timer_cs   <= '0';
-		   trap_cs    <= '0';
-			ioport_cs  <= '0';
+--		   trap_cs    <= '0';
+--		   map_cs     <= '0';
+		 when others =>
+		   cpu_data_in <= "00000000";
+		   monitor_cs <= '0';
+		   swtbug_cs  <= '0';
+--			boot_cs    <= '0';
+		   ram_cs     <= '0';
+		   dat_cs     <= '0';
+		   uart_cs    <= '0';
+		   cf_cs      <= '0';
+		   timer_cs   <= '0';
+--		   trap_cs    <= '0';
+--		   map_cs     <= '0';
 	    end case;
 end process;
 
 
 ----------------------------------------------------------------------
 --
---  Processes to read and write B5_SRAM
+--  Processes to read and write B3_SRAM
 --
 ----------------------------------------------------------------------
-b5_sram: process( cpu_clk,   Reset_n,
+b3_sram: process( SysClk,   Reset_n,
                   cpu_addr, cpu_rw,   cpu_data_out,
                   ram_cs,   ram_wrl,  ram_wru,
 		    		   dat_cs,   dat_addr, ram_data_out )
 begin
     ram_csn <= not( ram_cs and Reset_n);
-	 ram_wrl  <= dat_addr(0) and (not cpu_rw) and cpu_clk;
+	 ram_wrl  <= dat_addr(5) and (not cpu_rw) and SysClk;
 	 ram_wrln <= not ram_wrl;
-    ram_wru  <= (not dat_addr(0)) and (not cpu_rw) and cpu_clk;
+    ram_wru  <= (not dat_addr(5)) and (not cpu_rw) and SysClk;
 	 ram_wrun <= not ram_wru;
-	 ram_addr(16 downto 12) <= dat_addr(5 downto 1);
+	 ram_addr(16 downto 12) <= dat_addr(4 downto 0);
 	 ram_addr(11 downto 0 ) <= cpu_addr(11 downto 0);
 
     if ram_wrl = '1' then
@@ -643,7 +644,7 @@ begin
       ram_data(15 downto 8)  <= "ZZZZZZZZ";
     end if;
 
-	 if dat_addr(0) = '0' then
+	 if dat_addr(5) = '0' then
       ram_data_out <= ram_data(15 downto 8);
 	 else
       ram_data_out <= ram_data(7 downto 0);
@@ -677,72 +678,87 @@ begin
 end process;
 
 --
--- CPU bus signals
+-- ROM Map switch
+-- The Map switch output is initially set
+-- On a Write to the Map Switch port, clear the Map Switch
+-- and map the RAM in place of the boot ROM.
 --
-my_bus : process( cpu_clk, cpu_reset, cpu_rw, cpu_addr, cpu_data_out )
-begin
-	bus_clk   <= cpu_clk;
-   bus_reset <= cpu_reset;
-	bus_rw    <= cpu_rw;
-   bus_addr  <= cpu_addr;
-	if( cpu_rw = '1' ) then
-	   bus_data <= "ZZZZZZZZ";
-   else
-	   bus_data <= cpu_data_out;
-   end if;
-end process;
-
+--map_proc : process( SysClk, Reset_n, map_cs, cpu_rw )
+--begin
+--  if Sysclk'event and Sysclk = '1' then
+--    if Reset_n = '0' then
+--	    map_sw <= '1';
+--	 else
+--	    if (map_cs = '1') and (cpu_rw = '0') then
+--		   map_sw <= '0';
+--		 else
+--		   map_sw <= map_sw;
+--		 end if;
+--	 end if;
+--  end if;
+--end process;
 
 --
 -- Interrupts and Reset.
 --
-interrupts : process( Reset_n,
-							 trap_irq, timer_irq, uart_irq )
+interrupts : process( Reset_n, cpu_vma,
+--							 trap_irq,
+							 swtbug_hold,
+						    timer_irq, uart_irq )
 begin
     cpu_halt  <= '0';
-    cpu_hold  <= '0';
+	 cpu_hold  <= swtbug_hold;
+--	 cpu_hold  <= '0';
     cpu_irq   <= uart_irq or timer_irq;
-	 cpu_nmi   <= trap_irq;
+--	 cpu_nmi   <= trap_irq;
+	 cpu_nmi   <= '0';
  	 cpu_reset <= not Reset_n; -- CPU reset is active high
 end process;
 
 --
+-- Divide by 4 clock generator
+--
+--clock_gen: process (SysClk, clk_divider )
+--begin
+--    if(SysClk'event and SysClk = '0') then
+--      clk_divider <= clk_divider + "01";			 
+--    end if;
+--	 CpuClk <= clk_divider(1);
+--end process;
+
+--
 -- flash led to indicate code is working
 --
-flash: process (SysClk, Reset_n, CountL )
+flash: process (SysClk, CountL )
 begin
     if(SysClk'event and SysClk = '0') then
---	   if Reset_n = '0' then
---		  countL <= "000000000000000000000000";
---    else
-        countL <= countL + 1;
---		end if;			 
+      countL <= countL + 1;			 
     end if;
 	 LED <= countL(21);
---	 baudclk <= countL(5);  -- 9.8MHz / 64 = 153,600 KHz =  9600Bd * 16
---	 baudclk <= countL(4);  -- 9.8MHz / 32 = 307,200 KHz = 19200Bd * 16
---	 baudclk <= countL(3);  -- 9.8MHz / 16 = 614,400 KHz = 38400Bd * 16
---  baudclk <= countL(2);  -- 4.9MHz / 8  = 614,400 KHz = 38400Bd * 16
-	 dcd_n <= '0';
 end process;
 
+-- *** Test Bench - User Defined Section ***
+tb : PROCESS
+	variable count : integer;
+   BEGIN
 
---
--- 57.6 Kbaud * 16 divider for 25 MHz system clock
---
-my_clock: process( SysClk )
-begin
-    if(SysClk'event and SysClk = '0') then
-		if( BaudCount = 26 )	then
-		   BaudCount <= "00000";
-		else
-		   BaudCount <= BaudCount + 1;
-		end if;			 
-    end if;
-    baudclk <= BaudCount(4);  -- 25MHz / 27  = 926,000 KHz = 57,870Bd * 16
-	 dcd_n <= '0';
-end process;
-  
+	SysClk <= '0';
+	Reset_n <= '0';
+
+		for count in 0 to 512 loop
+			SysClk <= '0';
+			if count = 0 then
+				Reset_n <= '0';
+			elsif count = 1 then
+				Reset_n <= '1';
+			end if;
+			wait for 100 ns;
+			SysClk <= '1';
+			wait for 100 ns;
+		end loop;
+
+      wait; -- will wait forever
+   END PROCESS;
   
 end my_computer; --===================== End of architecture =======================--
 

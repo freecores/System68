@@ -76,30 +76,38 @@ architecture behavior of my_testbench is
 
 component cpu68
   port (    
+	 clk:	     in	std_logic;
+    rst:	     in	std_logic;
+    rw:	     out	std_logic;		-- Asynchronous memory interface
+    vma:	     out	std_logic;
+    address:  out	std_logic_vector(15 downto 0);
     data_in:  in	std_logic_vector(7 downto 0);
 	 data_out: out std_logic_vector(7 downto 0);
-    address:  out	std_logic_vector(15 downto 0);
-    vma:	     out	std_logic;
-    rw:	     out	std_logic;		-- Asynchronous memory interface
-    rst:	     in	std_logic;
-	 clk:	     in	std_logic;
+	 hold:     in  std_logic;
+	 halt:     in  std_logic;
 	 irq:      in  std_logic;
-	 nmi:      in  std_logic
+	 nmi:      in  std_logic;
+	 test_alu: out std_logic_vector(15 downto 0);
+	 test_cc:  out std_logic_vector(7 downto 0)
   );
 end component cpu68;
 
 
 begin
 cpu : cpu68  port map (    
+	 clk	     => SysClk,
+    rst	     => cpu_reset,
+    rw	     => cpu_rw,
+    vma       => cpu_vma,
+    address   => cpu_addr(15 downto 0),
     data_in   => cpu_data_in,
 	 data_out  => cpu_data_out,
-    address   => cpu_addr(15 downto 0),
-    vma       => cpu_vma,
-    rw	     => cpu_rw,
-    rst	     => cpu_reset,
-	 clk	     => SysClk,
+	 hold      => cpu_hold,
+	 halt      => cpu_halt,
 	 irq       => uart_irq,
-	 nmi       => timer_irq
+	 nmi       => timer_irq,
+	 test_alu  => cpu_alu,
+	 test_cc   => cpu_cc
   );
 
   -- *** Test Bench - User Defined Section ***

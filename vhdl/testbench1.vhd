@@ -89,6 +89,8 @@ component cpu68
     address:  out	std_logic_vector(15 downto 0);
     data_in:  in	std_logic_vector(7 downto 0);
 	 data_out: out std_logic_vector(7 downto 0);
+	 hold:     in  std_logic;
+	 halt:     in  std_logic;
 	 irq:      in  std_logic;
 	 nmi:      in  std_logic;
 	 test_alu: out std_logic_vector(15 downto 0);
@@ -106,6 +108,8 @@ cpu : cpu68  port map (
     address   => cpu_addr(15 downto 0),
     data_in   => cpu_data_in,
 	 data_out  => cpu_data_out,
+	 hold      => cpu_hold,
+	 halt      => cpu_halt,
 	 irq       => uart_irq,
 	 nmi       => timer_irq,
 	 test_alu  => cpu_alu,

@@ -86,40 +86,26 @@ begin
 --------------------------------
 --
 -- write control registers
--- doesn't do anything yet
 --
 --------------------------------
-timer_write : process( clk, rst, cs, rw, addr, data_in,
-                       timer_reg, timer_ctrl, timer_count )
+timer_write : process( clk, rst, cs, rw, addr, 
+                       data_in, timer_reg, timer_ctrl )
 begin
-  if clk'event and clk = '1' then
-    if rst = '1' then
-	   timer_reg <= "00000000";
+  if rst = '1' then
+	   timer_reg  <= "00000000";
 		timer_ctrl <= "00000000";
-    elsif cs = '1' and rw = '0' then
+  elsif clk'event and clk = '0' then
+    if cs = '1' and rw = '0' then
 	   if addr='0' then
-		  timer_reg <= data_in;
+		  timer_reg  <= data_in;
 		  timer_ctrl <= timer_ctrl;
-		  timer_term <= '0';
 	   else
-		  timer_reg <= timer_reg;
+		  timer_reg  <= timer_reg;
 		  timer_ctrl <= data_in;
-		  timer_term <= timer_term;
 		end if;
 	 else
 	   timer_ctrl <= timer_ctrl;
-		timer_reg <= timer_reg;
-	   if (timer_ctrl(T_enab) = '1') then
-		  if (timer_count = "00000000" ) then
-		    timer_term <= '1';
-		  elsif timer_ctrl(T_mode) = '0' then
-		    timer_term <= '0'; -- counter mode, reset on non zero
-		  else
-		    timer_term <= timer_term; -- timer mode, keep as is
-		  end if;
-		else
-		  timer_term <= timer_term;
-		end if;
+		timer_reg  <= timer_reg;
     end if;
   end if;
 end process;
@@ -136,20 +122,58 @@ begin
   end if;
 end process;
 
+
+--------------------------------
+--
+-- Terminal Count
+--
+--------------------------------
+timer_terminal : process( clk, rst, cs, rw, addr, data_in,
+                       timer_term, timer_ctrl, timer_count )
+begin
+  if rst = '1' then
+		timer_term <= '0';
+  elsif clk'event and clk = '0' then
+    if cs = '1' and rw = '0' then
+	   if addr='0' then
+		  -- Reset terminal count on write to counter
+		  timer_term <= '0';	
+	   else
+		  timer_term <= timer_term;
+		end if;
+	 else
+	   if (timer_ctrl(T_enab) = '1') then
+		  if (timer_count = "00000000" ) then
+		    -- If timer enabled, set terminal output on zero count
+		    timer_term <= '1';
+		  elsif timer_ctrl(T_mode) = '0' then
+			 -- counter mode, reset on non zero
+		    timer_term <= '0';
+		  else
+			 -- timer mode, keep as is
+		    timer_term <= timer_term; 
+		  end if; -- timer count
+		else
+		  timer_term <= timer_term;
+		end if; -- timer ctrl
+    end if;	-- cs
+  end if;  -- rst / clk
+end process;
+
+
 --------------------------------
 --
 -- counters
 --
 --------------------------------
 
-my_counter: process( clk, rst, timer_ctrl, timer_count, timer_in )
+timer_counter: process( clk, rst, timer_ctrl, timer_count, timer_in )
 variable timer_tmp : std_logic;
 begin
-  if clk'event and clk='1' then
-    if rst = '1' then
+  if rst = '1' then
 	   timer_count <= "00000000";
 		timer_tmp := '0';
-    else
+  elsif clk'event and clk = '0' then
       if timer_ctrl( T_enab ) = '1' then
 		  if timer_in = '0' and timer_tmp = '1' then
 		    timer_tmp := '0';
@@ -169,8 +193,7 @@ begin
 		  timer_tmp := timer_tmp;
 	     timer_count <= timer_count;
 	   end if; -- timer_ctrl
-    end if; -- rst
-  end if; -- clk
+  end if; -- rst / clk
 end process;
 
 --
@@ -179,12 +202,13 @@ end process;
   timer_interrupt : process( Clk, rst, cs, rw, addr,
                              timer_term, timer_int, timer_count, timer_ctrl )
   begin
-    if clk'event and clk = '1' then
+    if clk'event and clk = '0' then
 	   if rst = '1' then
 		  timer_int <= '0';
       elsif cs = '1' and rw = '1' then
 	     if addr = '0' then
-		    timer_int <= '0'; -- reset interrupt on read count
+			 -- reset interrupt on read count
+		    timer_int <= '0';
 		  else
 		    timer_int <= timer_int;
 		  end if;
@@ -196,7 +220,13 @@ end process;
 	  	  end if;
       end if;
     end if;
+  end process;
 
+--
+-- read timer strobe to reset interrupts
+--
+  timer_irq : process( timer_int, timer_ctrl )
+  begin
     if timer_ctrl( T_irq ) = '1' then
 	   irq <= timer_int;
 	 else
@@ -220,7 +250,7 @@ end process;
   timer_output : process( Clk, rst, timer_term, timer_ctrl, timer_tog )
   variable timer_tmp : std_logic; -- tracks change in terminal count
   begin
-    if clk'event and clk='1' then
+    if clk'event and clk = '0' then
       if rst = '1' then
 	     timer_tog <= '0';
 		  timer_tmp := '0';

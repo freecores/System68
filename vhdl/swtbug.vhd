@@ -7,7 +7,7 @@
 --
 -- File name      : swtbug.vhd
 --
--- entity name    : boot_rom
+-- entity name    : monitor_rom
 --
 -- Purpose        : Implements a 1K x 8 ROM containing the
 --                  SWTBUG monitor program for the SWTPC 6800
@@ -30,14 +30,15 @@ use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
 
-entity boot_rom is
+entity monitor_rom is
   port (
-    addr   : in   std_logic_vector(9 downto 0);
-    data   : out  std_logic_vector(7 downto 0)
+    cs     : in  std_logic;
+    addr   : in  std_logic_vector(9 downto 0);
+    data   : out std_logic_vector(7 downto 0)
   );
-end entity boot_rom;
+end;
 
-architecture basic of boot_rom is
+architecture basic of monitor_rom is
   constant width   : integer := 8;
   constant memsize : integer := 1024;
 
@@ -1071,6 +1072,6 @@ architecture basic of boot_rom is
 "11010000"
 );
 begin
-   data <= rom_data(conv_integer(addr)); 
-end architecture basic;
+   data <= rom_data(conv_integer(addr));
+end;
 
